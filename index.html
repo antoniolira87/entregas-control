@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#121212">
+    <meta name="description" content="App para controlar entregas em bicicleta com GPS, histórico financeiro e calendário">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Entregas">
+    <meta name="msapplication-TileColor" content="#121212">
+    <meta name="msapplication-TileImage" content="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23121212' width='192' height='192'/><text x='96' y='96' font-size='80' fill='%2300e676' text-anchor='middle' dominant-baseline='central'>🚴</text></svg>">
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" href="icon-192.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --green: #00e676; --purple: #ea80fc; --red: #ff5252; --blue: #2979ff; --yellow: #ffea00; --orange: #fc4c02; }
+        * { box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 10px; padding-bottom: 100px; display: flex; flex-direction: column; align-items: center; user-select: none; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; -webkit-touch-callout: none; }
+        
+        .card, .weather-card, .gps-mini { width: 100%; max-width: 450px; background: var(--card); border-radius: 15px; padding: 12px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #333; }
+        .weather-card { background: linear-gradient(135deg, #263238, #102027); border: 1px solid #455a64; }
+        
+        .w-top, .cal-head { display: flex; justify-content: space-between; align-items: center; }
+        .w-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 10px; border-top: 1px solid #455a64; padding-top: 10px; }
+        .mid-row { display: flex; gap: 10px; width: 100%; max-width: 450px; margin-bottom: 10px; }
+        .gps-mini { flex: 1.4; background: #263238; border: 2px solid #455a64; text-align: center; display: flex; flex-direction: column; justify-content: space-between; padding: 15px; }
+        .dash-stack { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+        .dash-item { background: var(--card); border-radius: 12px; flex: 1; display: flex; flex-direction: column; justify-content: center; text-align: center; border: 1px solid #333; padding: 10px; }
+
+        .w-temp { font-size: 2rem; font-weight: bold; color: #fff; }
+        .w-lbl { font-size: 0.65rem; color: #90a4ae; }
+        .w-val { font-size: 0.8rem; color: #eceff1; }
+        .gps-num { font-size: 2rem; font-weight: bold; color: var(--green); }
+        .gps-spd { color: var(--yellow); font-weight: bold; font-size: 1.2rem; margin: 8px 0; }
+        .gps-avg { color: #aaa; font-size: 0.9rem; }
+        .bg-tag { font-size: 0.6rem; color: #888; display: none; margin-top: 5px; }
+
+        #timerDisplay { font-family: monospace; font-size: 1.5rem; color: var(--green); font-weight: bold; letter-spacing: 2px; margin-bottom: 5px; }
+
+        .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; text-align: center; }
+        .day { height: 35px; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; background: #2c2c2c; border-radius: 6px; cursor: pointer; user-select: none; }
+        .day.today { color: var(--green); font-weight: 900; }
+        .day.selected { border: 2px solid var(--green); background: #333; color: #fff; font-weight: bold; }
+        .day.work { background: rgba(0, 230, 118, 0.2); color: var(--green); }
+        .day.escala { background: rgba(234, 128, 252, 0.2); color: var(--purple); }
+
+        .tabs { display: flex; width: 100%; max-width: 450px; margin-bottom: 10px; background: #2c2c2c; border-radius: 8px; padding: 4px; }
+        .tab { flex: 1; padding: 10px; background: none; border: none; color: #888; font-weight: bold; border-radius: 6px; cursor: pointer; }
+        .tab.active { background: #444; color: #fff; }
+        input { width: 100%; padding: 12px; background: #2c2c2c; border: 1px solid #444; border-radius: 8px; color: white; margin-bottom: 10px; box-sizing: border-box; }
+        input[type="date"], input[type="time"] { color-scheme: dark; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; margin-top: 5px; cursor: pointer; transition: all 0.2s; }
+        button:active { transform: scale(0.98); }
+        
+        .history { width: 100%; max-width: 450px; margin-top: 20px; }
+        .item { background: var(--card); padding: 10px; border-radius: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid #555; }
+        
+        #finishModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #121212; z-index: 10000; flex-direction: column; }
+        #finishHeader { padding: 20px; background: #1e1e1e; border-bottom: 1px solid #333; }
+        #finishMapContainer { flex: 1; width: 100%; background: #000; }
+        #finishForm { padding: 20px; background: #1e1e1e; border-top: 1px solid #333; overflow-y: auto; }
+        
+        #viewMapModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 9999; flex-direction: column; }
+        #viewMapC { flex: 1; }
+
+        .gps-stats-live { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+        .stat-mini { background: #2c2c2c; padding: 8px; border-radius: 6px; text-align: center; border-left: 3px solid var(--green); font-size: 0.8rem; }
+
+        #installModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.98); z-index: 9999; }
+        
+        .install-container { max-width: 450px; margin: 50px auto; padding: 30px; background: linear-gradient(135deg, #00e676 0%, #00b85c 100%); border-radius: 20px; text-align: center; box-shadow: 0 10px 40px rgba(0,230,118,0.3); }
+        .install-container h1 { font-size: 2.5rem; color: #000; margin: 0 0 10px 0; }
+        .install-container p { color: #000; font-size: 1rem; margin: 0 0 30px 0; opacity: 0.9; }
+
+        .install-btn-main { padding: 20px; background: #000; color: var(--green); border: none; border-radius: 12px; font-weight: bold; font-size: 1.3rem; cursor: pointer; width: 100%; margin-bottom: 20px; }
+        .install-btn-main:active { transform: scale(0.95); }
+
+        .install-close { padding: 12px; background: rgba(0,0,0,0.3); color: #000; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; width: 100%; }
+
+        #menuOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 999; }
+        #appMenu { display: none; position: fixed; top: 60px; right: 10px; background: #2c2c2c; border: 1px solid #555; border-radius: 10px; padding: 15px; z-index: 1000; width: 220px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        #appMenu button { width: 100%; padding: 12px; margin: 8px 0; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+
+        #whatsappWarning { display: none; width: 100%; max-width: 450px; background: var(--red); color: white; padding: 15px; border-radius: 10px; margin-bottom: 10px; text-align: center; border: 2px solid #ff1744; font-weight: bold; }
+
+        @keyframes slideDown { from { transform: translateY(-30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .install-container { animation: slideDown 0.5s ease-out; }
+    </style>
+</head>
+<body>
+
+    <audio id="silentAudio" loop><source src="data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0VAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//////////////////////////////////////////////////////////////////wAAAAAAMAAAAAAAAAABFh5rN0O1AAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAABFh5rN0O1AAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAABFh5rN0O1AAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAABFh5rN0O1AAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAABFh5rN0O1AAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAaaaABFh5rN0O1AAAAAAAAAAAAAAAAAAAAAAAA" type="audio/mpeg"></audio>
+
+    <!-- MODAL INSTALAÇÃO -->
+    <div id="installModal">
+        <div class="install-container">
+            <h1>📱 Instale Agora!</h1>
+            <p>Use Entregas Control como um app</p>
+            <button class="install-btn-main" id="installBtn" onclick="installApp()" style="display:none;">⬇️ INSTALAR</button>
+            <button class="install-close" onclick="closeInstallModal()">Fechar</button>
+        </div>
+    </div>
+
+    <!-- AVISO WHATSAPP -->
+    <div id="whatsappWarning">⚠️ ABRA EM NAVEGADOR! GPS não funciona no WhatsApp.</div>
+
+    <!-- MENU -->
+    <div id="menuOverlay" onclick="closeAppMenu()"></div>
+    <div id="appMenu">
+        <button style="background:var(--green); color:#000;" id="menuInstallBtn" onclick="showInstallModal()" style="display:none;">📲 INSTALAR</button>
+        <button style="background:#ff5252; color:white;" onclick="zerarTudo()">🗑️ ZERAR</button>
+        <button style="background:#333; color:#aaa; border:1px solid #555;" onclick="closeAppMenu()">Fechar</button>
+    </div>
+
+    <!-- MODAL MAPA FINAL -->
+    <div id="finishModal">
+        <div id="finishHeader">
+            <div style="font-size:1.3rem; font-weight:bold; color:var(--green); margin-bottom:5px;">🎉 Atividade Concluída!</div>
+            <div style="font-size:0.95rem; color:var(--green); margin-bottom:10px;" id="finishStats">0.00 km • 00:00:00</div>
+        </div>
+        <div id="finishMapContainer"></div>
+        <div id="finishForm">
+            <label style="color:#aaa; font-size:0.8rem;">Nome da atividade</label>
+            <input type="text" id="routeTitle" placeholder="Ex: Pedalada da Tarde">
+            <button style="background:var(--orange); color:#fff;" onclick="confirmSave()">✅ SALVAR</button>
+            <button style="background:transparent; color:#ff5252; border:1px solid #ff5252;" onclick="discardRoute()">Descartar</button>
+        </div>
+    </div>
+
+    <!-- MODAL VER MAPA -->
+    <div id="viewMapModal">
+        <div style="padding:15px; background:#1e1e1e; display:flex; justify-content:space-between;">
+            <span style="font-weight:bold;">📍 Trajeto</span>
+            <button onclick="closeViewMap()" style="width:auto; padding:5px 15px; margin:0; background:#333; color:white; border:none; border-radius:6px;">FECHAR</button>
+        </div>
+        <div id="viewMapC"></div>
+    </div>
+
+    <!-- HEADER -->
+    <div style="width:100%; max-width:450px; display:flex; justify-content:space-between; align-items:center; margin-top:10px; margin-bottom:10px;">
+        <h1 style="margin:0;">🚴 Entregas Control</h1>
+        <button onclick="showAppMenu()" style="width:auto; padding:8px 12px; background:#333; color:#fff; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:1.2rem;">⚙️</button>
+    </div>
+
+    <!-- CLIMA -->
+    <div class="weather-card card">
+        <div class="w-top">
+            <div>
+                <div style="font-size:0.7rem; color:#90a4ae;">CURITIBA</div>
+                <div class="w-temp" id="temp">--°</div>
+                <div style="color:#ffab40; font-size:0.8rem; font-weight:bold;">Sensação: <span id="feels">--</span></div>
+            </div>
+            <div style="font-size:2rem;" id="icon">🌤️</div>
+        </div>
+        <div class="w-grid">
+            <div><div class="w-lbl">VENTO</div><div class="w-val" id="wind">--</div></div>
+            <div><div class="w-lbl">CHUVA</div><div class="w-val" id="rain">--</div></div>
+            <div><div class="w-lbl">UMIDADE</div><div class="w-val" id="hum">--</div></div>
+        </div>
+    </div>
+
+    <!-- NAVEGAÇÃO -->
+    <div class="card">
+        <div style="font-size:0.8rem; font-weight:bold; color:var(--blue); margin-bottom:10px;">📍 Google Maps</div>
+        <input type="text" id="navDest" placeholder="Digite endereço...">
+        <button style="background:var(--blue); color:white;" onclick="openNav()">🚴 ROTA (sem ladeiras)</button>
+    </div>
+
+    <!-- GPS -->
+    <div class="mid-row">
+        <div class="gps-mini">
+            <div id="timerDisplay">00:00:00</div>
+            <div><div class="gps-num" id="km">0.00</div><div style="font-size:0.6rem; color:#aaa;">KM</div></div>
+            <div class="gps-spd" id="spd">0.0 km/h</div>
+            <div class="gps-avg" id="avgSpd">Média: 0.0 km/h</div>
+            <button style="background:var(--green); color:#000;" id="btnStart" onclick="startGPS()">▶️ INICIAR</button>
+            <button style="background:var(--red); color:white; display:none;" id="btnStop" onclick="stopGPS()">⏹️ FINALIZAR</button>
+            <div class="bg-tag" id="bgTag">🔊 GPS Ativo</div>
+            <div class="gps-stats-live" id="gpsStatsLive" style="display:none;">
+                <div class="stat-mini"><div style="font-size:0.65rem;">Pontos</div><div style="font-size:0.95rem; font-weight:bold; color:var(--green);" id="pointCount">0</div></div>
+                <div class="stat-mini"><div style="font-size:0.65rem;">Precisão</div><div style="font-size:0.95rem; font-weight:bold; color:var(--green);" id="accuracy">0m</div></div>
+            </div>
+        </div>
+        <div class="dash-stack">
+            <div class="dash-item"><span style="font-size:0.6rem; color:#aaa;">A RECEBER</span><span style="font-weight:bold; color:var(--yellow);" id="valIfood">R$ 0,00</span></div>
+            <div class="dash-item"><span style="font-size:0.6rem; color:#aaa;">NUBANK</span><span style="font-weight:bold; color:var(--purple);" id="valNu">R$ 0,00</span></div>
+        </div>
+    </div>
+
+    <!-- CALENDÁRIO -->
+    <div class="card">
+        <div class="cal-head"><span onclick="moveMonth(-1)" style="cursor:pointer; font-size:1.2rem;">◀</span><span id="monthLbl">Mês</span><span onclick="moveMonth(1)" style="cursor:pointer; font-size:1.2rem;">▶</span></div>
+        <div class="days" style="margin-bottom:5px; font-size:0.7rem; color:#666;"><div>D</div><div>S</div><div>T</div><div>Q</div><div>Q</div><div>S</div><div>S</div></div>
+        <div class="days" id="calGrid"></div>
+    </div>
+
+    <!-- ABAS -->
+    <div class="tabs">
+        <button class="tab active" onclick="setTab('escala')">Escala</button>
+        <button class="tab" onclick="setTab('ganho')">Entregas</button>
+        <button class="tab" onclick="setTab('despesa')">Despesas</button>
+        <button class="tab" onclick="setTab('repasse')">Repasse</button>
+    </div>
+
+    <!-- FORMULÁRIO -->
+    <div class="card">
+        <label style="font-size:0.8rem; color:var(--blue); font-weight:bold;">Data</label>
+        <input type="date" id="dateIn">
+        
+        <div id="p-escala">
+            <div style="display:flex; gap:10px;"><input type="time" id="t1" value="19:00"><input type="time" id="t2" value="23:00"></div>
+            <button style="background:var(--purple);" id="btnEscala" onclick="addEscala()">📅 Agendar</button>
+        </div>
+
+        <div id="p-valor" style="display:none;">
+            <input type="text" id="desc" placeholder="Descrição">
+            <input type="number" id="val" placeholder="R$ 0.00" step="0.10">
+            <button style="background:var(--green);" onclick="addVal()">Registrar</button>
+        </div>
+
+        <div id="p-repasse" style="display:none;">
+            <input type="number" id="valRep" placeholder="R$ 0.00" step="0.10">
+            <button style="background:#1565c0; color:white;" onclick="addRep(false)">📅 Repasse (Quarta)</button>
+            <button style="background:var(--blue); color:white;" onclick="addRep(true)">⚡ Antecipação</button>
+            <div style="text-align:center; font-size:0.7rem; margin-top:5px;" id="antCount">0/4</div>
+        </div>
+    </div>
+
+    <!-- HISTÓRICO -->
+    <div class="history">
+        <h4 style="color:#666; border-bottom:1px solid #333; margin:0 0 10px 0;">📜 Histórico</h4>
+        <div id="list"></div>
+        <div id="sys-status" style="text-align:center; font-size:0.8rem; color:#666; padding:10px;">Carregando...</div>
+    </div>
+
+    <script>
+        // ===== VARIÁVEIS GLOBAIS =====
+        let deferredPrompt = null;
+        let db = JSON.parse(localStorage.getItem('db_v19')) || [];
+        let gps = newGPS();
+        let mode = 'escala', calDate = new Date(), editId = null;
+        let finishMap = null, viewMap = null, timerInterval = null;
+        const audio = document.getElementById('silentAudio');
+
+        // ===== INICIALIZAÇÃO =====
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            document.getElementById('installBtn').style.display = 'block';
+            document.getElementById('menuInstallBtn').style.display = 'block';
+        });
+
+        window.addEventListener('appinstalled', () => {
+            deferredPrompt = null;
+            document.getElementById('installBtn').style.display = 'none';
+            document.getElementById('menuInstallBtn').style.display = 'none';
+        });
+
+        window.onload = () => {
+            selDate(new Date());
+            loadGPS();
+            weather();
+            renderUI();
+            setInterval(() => weather(), 900000);
+            detectWhatsApp();
+            registerSW();
+        };
+
+        // ===== SERVICE WORKER =====
+        function registerSW() {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('sw.js').catch(() => {});
+            }
+        }
+
+        // ===== INSTALAÇÃO =====
+        function installApp() {
+            const ua = navigator.userAgent.toLowerCase();
+            const isIOS = /iphone|ipad|ipod/.test(ua);
+            
+            if (isIOS) {
+                if (navigator.share) {
+                    navigator.share({
+                        title: 'Entregas Control',
+                        text: 'Use Entregas Control como um app',
+                        url: window.location.href
+                    }).then(() => closeInstallModal()).catch(() => closeInstallModal());
+                } else {
+                    closeInstallModal();
+                }
+            } else {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    deferredPrompt.userChoice.then(() => {
+                        closeInstallModal();
+                        deferredPrompt = null;
+                    }).catch(() => closeInstallModal());
+                } else {
+                    closeInstallModal();
+                }
+            }
+        }
+
+        function showInstallModal() {
+            document.getElementById('installModal').style.display = 'block';
+        }
+
+        function closeInstallModal() {
+            document.getElementById('installModal').style.display = 'none';
+        }
+
+        // ===== DETECÇÃO =====
+        function detectWhatsApp() {
+            if (navigator.userAgent.includes('WhatsApp')) {
+                document.getElementById('whatsappWarning').style.display = 'block';
+            }
+        }
+
+        // ===== MENU =====
+        function showAppMenu() {
+            document.getElementById('appMenu').style.display = 'block';
+            document.getElementById('menuOverlay').style.display = 'block';
+        }
+
+        function closeAppMenu() {
+            document.getElementById('appMenu').style.display = 'none';
+            document.getElementById('menuOverlay').style.display = 'none';
+        }
+
+        function zerarTudo() {
+            if(!confirm('⚠️ Apagar TUDO?')) return;
+            if(!confirm('🚨 TEM CERTEZA?')) return;
+            localStorage.clear();
+            db = [];
+            gps = newGPS();
+            location.reload();
+        }
+
+        // ===== GPS =====
+        const GPS_MAX_ACC = 40;   // m - pontos com precisão pior que isso não entram no trajeto
+        const GPS_MAX_SPD = 70;   // km/h - acima disso é salto do GPS, não movimento real
+        let watchId = null, wakeLock = null;
+
+        function newGPS() {
+            return { on: false, km: 0, route: [], last: null, startTime: null, endTime: null, movingMs: 0, maxSpd: 0, lastAccuracy: 0, win: [] };
+        }
+
+        function startGPS(resume) {
+            if(!navigator.geolocation) return alert("❌ GPS não suportado");
+            if (navigator.userAgent.includes('WhatsApp')) {
+                alert('❌ GPS não funciona no WhatsApp');
+                return;
+            }
+
+            if(!resume) {
+                gps = newGPS();
+                gps.on = true;
+                gps.startTime = Date.now();
+            }
+
+            audio.play().catch(() => {});
+            requestWakeLock();
+
+            document.getElementById('bgTag').style.display = 'block';
+            document.getElementById('gpsStatsLive').style.display = 'grid';
+            document.getElementById('btnStart').style.display = 'none';
+            document.getElementById('btnStop').style.display = 'block';
+            document.getElementById('km').innerText = gps.km.toFixed(2);
+            document.getElementById('pointCount').innerText = gps.route.length;
+            document.getElementById('accuracy').innerText = 'buscando...';
+            startTimerDisplay();
+
+            if(watchId !== null) navigator.geolocation.clearWatch(watchId);
+            watchId = navigator.geolocation.watchPosition(onGPS, onGPSError, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+            saveGPS();
+        }
+
+        function onGPS(p) {
+            if(!gps.on) return;
+            const lat = p.coords.latitude, lon = p.coords.longitude, acc = p.coords.accuracy;
+            const t = p.timestamp || Date.now();
+            const accEl = document.getElementById('accuracy');
+            gps.lastAccuracy = acc;
+            accEl.innerText = Math.round(acc) + 'm';
+            accEl.style.color = acc <= GPS_MAX_ACC ? 'var(--green)' : 'var(--yellow)';
+            if(acc > GPS_MAX_ACC) return; // sinal fraco: espera melhorar
+
+            // muitos celulares não informam coords.speed; nesse caso calcula pela distância/tempo
+            const devSpd = (p.coords.speed != null && p.coords.speed >= 0) ? p.coords.speed * 3.6 : null;
+            let spd = 0;
+
+            if(!gps.last) {
+                gps.route.push({ lat, lon, spd: 0 });
+                gps.last = { lat, lon, t };
+            } else {
+                const dt = (t - (gps.last.t || t)) / 1000;
+                const dist = calcDist(gps.last.lat, gps.last.lon, lat, lon);
+                const calcSpd = dt > 0 ? dist / (dt / 3600) : 0;
+                if(calcSpd > GPS_MAX_SPD) return;
+
+                // só conta se andou mais que o erro do GPS (evita km fantasma parado no semáforo)
+                if(dist * 1000 >= Math.max(5, acc * 0.5)) {
+                    // velocidade calculada é suavizada nos últimos ~5s para o ruído do GPS não gerar picos
+                    gps.win.push({ dist, dt });
+                    while(gps.win.length > 1 && gps.win.reduce((a, w) => a + w.dt, 0) - gps.win[0].dt >= 5) gps.win.shift();
+                    const wDist = gps.win.reduce((a, w) => a + w.dist, 0), wDt = gps.win.reduce((a, w) => a + w.dt, 0);
+                    spd = devSpd !== null ? devSpd : (wDt > 0 ? wDist / (wDt / 3600) : 0);
+                    gps.km += dist;
+                    if(spd >= 3) gps.movingMs += Math.min(dt, 30) * 1000;
+                    if(spd > gps.maxSpd && spd < GPS_MAX_SPD) gps.maxSpd = spd;
+                    gps.route.push({ lat, lon, spd });
+                    gps.last = { lat, lon, t };
+                } else {
+                    spd = devSpd !== null ? devSpd : 0;
+                    if(dt > 5) gps.win = [];
+                }
+            }
+            if(spd < 1) spd = 0;
+
+            document.getElementById('spd').innerText = spd.toFixed(1) + ' km/h';
+            document.getElementById('km').innerText = gps.km.toFixed(2);
+            document.getElementById('pointCount').innerText = gps.route.length;
+            document.getElementById('avgSpd').innerText = 'Média: ' + avgSpeed().toFixed(1) + ' km/h';
+            saveGPS();
+        }
+
+        function onGPSError(e) {
+            if(!gps.on) return;
+            if(e.code === 1) {
+                alert('❌ Permissão de localização negada. Libere o GPS para este site nas configurações do navegador.');
+                stopGPS();
+                return;
+            }
+            // sem sinal / timeout: o watch continua tentando, só avisa na tela
+            document.getElementById('accuracy').innerText = 'sem sinal';
+            document.getElementById('accuracy').style.color = 'var(--red)';
+        }
+
+        function avgSpeed() {
+            return gps.movingMs > 0 ? gps.km / (gps.movingMs / 3600000) : 0;
+        }
+
+        async function requestWakeLock() {
+            try { if('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e) {}
+        }
+
+        function releaseWakeLock() {
+            if(wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+        }
+
+        // a tela pode soltar o wake lock ao minimizar; pede de novo ao voltar
+        document.addEventListener('visibilitychange', () => {
+            if(document.visibilityState === 'visible' && gps.on) requestWakeLock();
+        });
+
+        function stopGPS() {
+            if(watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+            releaseWakeLock();
+            gps.on = false;
+            gps.endTime = Date.now();
+            document.getElementById('btnStart').style.display = 'block';
+            document.getElementById('btnStop').style.display = 'none';
+            document.getElementById('bgTag').style.display = 'none';
+            document.getElementById('gpsStatsLive').style.display = 'none';
+            audio.pause();
+            stopTimerDisplay();
+            saveGPS();
+
+            if(gps.route.length < 2) {
+                alert('❌ Nenhum trajeto registrado: o GPS não pegou sinal bom. Tente em área aberta e espere a precisão ficar verde antes de sair.');
+                resetGPS();
+                return;
+            }
+
+            document.getElementById('finishModal').style.display = 'flex';
+            document.getElementById('finishStats').innerText =
+                `${gps.km.toFixed(2)} km • ${getDurationStr()} • Média ${avgSpeed().toFixed(1)} km/h • Máx ${gps.maxSpd.toFixed(1)} km/h`;
+
+            const hour = new Date().getHours();
+            let periodo = hour < 12 ? "Manhã" : hour < 18 ? "Tarde" : "Noite";
+            document.getElementById('routeTitle').value = `Pedalada da ${periodo}`;
+
+            setTimeout(() => {
+                if(finishMap) finishMap.remove();
+                finishMap = L.map('finishMapContainer');
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(finishMap);
+                drawPolyline(gps.route, finishMap);
+                const a = gps.route[0], b = gps.route[gps.route.length-1];
+                L.circleMarker([a.lat, a.lon], { radius: 8, fillColor: '#00e676', color: '#fff', weight: 2, fillOpacity: 0.8 }).addTo(finishMap);
+                L.circleMarker([b.lat, b.lon], { radius: 8, fillColor: '#ff5252', color: '#fff', weight: 2, fillOpacity: 0.8 }).addTo(finishMap);
+                finishMap.invalidateSize();
+            }, 300);
+        }
+
+        function drawPolyline(points, map) {
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i], p2 = points[i+1];
+                let color = '#fc4c02';
+                if (p1.spd < 5) color = '#ff1744';
+                if (p1.spd >= 20) color = '#00e676';
+
+                L.polyline([[p1.lat, p1.lon], [p2.lat, p2.lon]], { color, weight: 6, opacity: 0.8, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+            }
+            const bounds = points.map(p => [p.lat, p.lon]);
+            if(bounds.length > 1) map.fitBounds(bounds, { padding: [50, 50] });
+            else if(bounds.length === 1) map.setView(bounds[0], 16);
+        }
+
+        function confirmSave() {
+            const title = document.getElementById('routeTitle').value || "Pedalada";
+            const d = new Date();
+            db.unshift({ id: Date.now(), type: 'km', date: fmtDate(d), val: gps.km, route: gps.route, desc: title, time: getDurationStr(), avg: avgSpeed(), maxSpd: gps.maxSpd });
+            saveDB();
+            discardRoute();
+            alert("✅ Atividade Salva!");
+        }
+
+        function discardRoute() { document.getElementById('finishModal').style.display = 'none'; resetGPS(); }
+        function resetGPS() {
+            localStorage.removeItem('gps_v19');
+            gps = newGPS();
+            document.getElementById('km').innerText = "0.00";
+            document.getElementById('spd').innerText = "0.0 km/h";
+            document.getElementById('avgSpd').innerText = "Média: 0.0 km/h";
+            document.getElementById('pointCount').innerText = "0";
+            stopTimerDisplay();
+        }
+        // se o celular recarregou a página no meio do trajeto, continua de onde parou
+        function loadGPS() {
+            const s = JSON.parse(localStorage.getItem('gps_v19'));
+            if(s && s.on) { gps = Object.assign(newGPS(), s); startGPS(true); }
+        }
+        function saveGPS() { localStorage.setItem('gps_v19', JSON.stringify(gps)); }
+
+        function startTimerDisplay() {
+            if(timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if(!gps.startTime) return;
+                document.getElementById('timerDisplay').innerText = getDurationStr();
+            }, 1000);
+        }
+
+        function stopTimerDisplay() { if(timerInterval) clearInterval(timerInterval); document.getElementById('timerDisplay').innerText = "00:00:00"; }
+
+        function getDurationStr() {
+            if(!gps.startTime) return "00:00:00";
+            const diff = (gps.endTime || Date.now()) - gps.startTime;
+            const h = Math.floor(diff / 3600000), m = Math.floor((diff % 3600000) / 60000), s = Math.floor((diff % 60000) / 1000);
+            return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        }
+
+        function calcDist(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        // ===== NAVEGAÇÃO E MAPAS =====
+        function openNav() {
+            const dest = document.getElementById('navDest').value;
+            if(!dest) return alert("Digite um endereço!");
+            window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&travelmode=bicycling`, '_blank');
+        }
+
+        function openMap(id) {
+            const item = db.find(x => x.id === id);
+            if(!item || !item.route) return;
+            document.getElementById('viewMapModal').style.display = 'flex';
+            setTimeout(() => {
+                if(viewMap) viewMap.remove();
+                viewMap = L.map('viewMapC');
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(viewMap);
+                drawPolyline(item.route, viewMap);
+                viewMap.invalidateSize();
+            }, 200);
+        }
+
+        function closeViewMap() {
+            document.getElementById('viewMapModal').style.display = 'none';
+        }
+
+        // ===== FORMULÁRIO =====
+        function setTab(m) {
+            mode = m;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            ['p-escala','p-valor','p-repasse'].forEach(id => document.getElementById(id).style.display = 'none');
+            if(m === 'escala') { document.getElementById('p-escala').style.display = 'block'; chkEscala(); }
+            else if(m === 'repasse') { document.getElementById('p-repasse').style.display = 'block'; countAnt(); }
+            else { document.getElementById('p-valor').style.display = 'block'; }
+        }
+
+        function addVal() {
+            const v = parseFloat(document.getElementById('val').value);
+            if(!v) return;
+            const d = document.getElementById('dateIn').value.split('-').reverse().join('/');
+            const txt = mode === 'ganho' ? "Entrega" : document.getElementById('desc').value;
+            db.unshift({id: Date.now(), type: mode, date: d, val: v, desc: txt});
+            saveDB();
+            document.getElementById('val').value = '';
+        }
+
+        function addRep(isAnt) {
+            const v = parseFloat(document.getElementById('valRep').value);
+            if(!v) return;
+            const d = new Date();
+            db.unshift({id: Date.now(), type: isAnt ? 'ant' : 'rep', date: fmtDate(d), val: v});
+            saveDB();
+        }
+
+        function addEscala() {
+            const d = document.getElementById('dateIn').value.split('-').reverse().join('/');
+            if(editId) db = db.filter(x => x.id !== editId);
+            else db.unshift({id: Date.now(), type: 'escala', date: d, t1: document.getElementById('t1').value, t2: document.getElementById('t2').value});
+            editId = null;
+            saveDB();
+            chkEscala();
+        }
+
+        function chkEscala() {
+            const d = document.getElementById('dateIn').value.split('-').reverse().join('/');
+            const f = db.find(x => x.type === 'escala' && x.date === d);
+            const b = document.getElementById('btnEscala');
+            if(f) {
+                editId = f.id;
+                b.innerText = "Desmarcar";
+                b.style.background = "#333";
+            } else {
+                editId = null;
+                b.innerText = "📅 Agendar";
+                b.style.background = "var(--purple)";
+            }
+        }
+
+        function countAnt() {
+            const c = db.filter(x => x.type === 'ant' && x.date.split('/')[1] === String(new Date().getMonth()+1).padStart(2,'0')).length;
+            document.getElementById('antCount').innerText = `${c}/4`;
+        }
+
+        // ===== CALENDÁRIO =====
+        function selDate(d) {
+            calDate = new Date(d);
+            document.getElementById('dateIn').value = d.toISOString().split('T')[0];
+            chkEscala();
+            renderUI();
+        }
+
+        function moveMonth(n) {
+            calDate.setMonth(calDate.getMonth() + n);
+            renderUI();
+        }
+
+        // ===== PERSISTÊNCIA =====
+        function saveDB() {
+            localStorage.setItem('db_v19', JSON.stringify(db));
+            renderUI();
+        }
+
+        function renderUI() {
+            let sf = 0, sn = 0;
+            db.forEach(x => {
+                if(x.type === 'ganho') sf += x.val;
+                if(x.type === 'despesa') sn -= x.val;
+                if(x.type === 'rep' || x.type === 'ant') { sf -= x.val; sn += x.val; }
+            });
+            document.getElementById('valIfood').innerText = `R$ ${sf.toFixed(2)}`;
+            document.getElementById('valNu').innerText = `R$ ${sn.toFixed(2)}`;
+
+            const l = document.getElementById('list');
+            l.innerHTML = '';
+            db.sort((a,b) => b.id - a.id).forEach(x => {
+                const el = document.createElement('div');
+                el.className = 'item';
+                el.style.borderLeftColor = getClr(x.type);
+                let txt = `R$ ${x.val ? x.val.toFixed(2) : 0}`;
+                if(x.type === 'escala') txt = `${x.t1}-${x.t2}`;
+                if(x.type === 'km') txt = `${x.val.toFixed(2)} km • ${x.time || '--:--'}${x.avg ? ' • ' + x.avg.toFixed(1) + ' km/h' : ''}`;
+                let btn = (x.type === 'km' && x.route) ? `<button onclick="openMap(${x.id})" style="width:auto; padding:5px 8px; margin:0 5px; background:var(--orange); color:white; border:none; border-radius:4px; cursor:pointer;">MAPA</button>` : '';
+                el.innerHTML = `<div><b>${x.desc || 'Escala'}</b><br><small>${x.date}</small></div><div style="display:flex; align-items:center; gap:5px;"><span>${txt}</span>${btn}<span onclick="del(${x.id})" style="color:#555; cursor:pointer;">✖</span></div>`;
+                l.appendChild(el);
+            });
+
+            const g = document.getElementById('calGrid');
+            g.innerHTML = '';
+            const m = calDate.getMonth(), y = calDate.getFullYear();
+            document.getElementById('monthLbl').innerText = `${m+1}/${y}`;
+            const f = new Date(y,m,1).getDay(), t = new Date(y,m+1,0).getDate();
+            const todayStr = fmtDate(new Date()), selectedStr = fmtDate(calDate);
+            
+            for(let i = 0; i < f; i++) g.appendChild(document.createElement('div'));
+            for(let i = 1; i <= t; i++) {
+                const d = document.createElement('div');
+                d.className = 'day';
+                d.innerText = i;
+                d.onclick = () => selDate(new Date(y, m, i));
+                const ds = `${String(i).padStart(2,'0')}/${String(m+1).padStart(2,'0')}/${y}`;
+                if(db.some(x => x.date === ds && x.type === 'ganho')) d.classList.add('work');
+                else if(db.some(x => x.date === ds && x.type === 'escala')) d.classList.add('escala');
+                if(ds === todayStr) d.classList.add('today');
+                if(ds === selectedStr) d.classList.add('selected');
+                g.appendChild(d);
+            }
+        }
+
+        // ===== CLIMA =====
+        async function weather() {
+            try {
+                const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-25.42&longitude=-49.27&current=temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,relative_humidity_2m&daily=precipitation_probability_max&timezone=America%2FSao_Paulo');
+                const d = await r.json();
+                document.getElementById('temp').innerText = d.current.temperature_2m.toFixed(1) + "°";
+                document.getElementById('feels').innerText = d.current.apparent_temperature.toFixed(1) + "°";
+                document.getElementById('wind').innerText = d.current.wind_speed_10m;
+                document.getElementById('rain').innerText = d.daily.precipitation_probability_max[0] + "%";
+                document.getElementById('hum').innerText = d.current.relative_humidity_2m + "%";
+            } catch(e) {}
+        }
+
+        // ===== UTILITÁRIOS =====
+        function fmtDate(d) { return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; }
+        function getClr(t) { return {'ganho':'var(--green)','despesa':'var(--red)','escala':'var(--purple)','km':'var(--orange)','rep':'var(--blue)','ant':'var(--blue)'}[t] || 'var(--blue)'; }
+        function del(id) { if(confirm("Apagar?")){ db = db.filter(x => x.id !== id); saveDB(); } }
+    </script>
+</body>
+</html>
