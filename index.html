@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Entregas">
     <meta name="msapplication-TileColor" content="#121212">
-    <meta name="msapplication-TileImage" content="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23121212' width='192' height='192'/><text x='96' y='96' font-size='80' fill='%2300e676' text-anchor='middle' dominant-baseline='central'>🚴</text></svg>">
+    <meta name="msapplication-TileImage" content="icon-192.png">
     
     <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" href="icon-192.png">
@@ -103,7 +103,7 @@
     <div id="installModal">
         <div class="install-container">
             <h1>📱 Instale Agora!</h1>
-            <p>Use Entregas Control como um app</p>
+            <p id="installMsg">Use Entregas Control como um app</p>
             <button class="install-btn-main" id="installBtn" onclick="installApp()" style="display:none;">⬇️ INSTALAR</button>
             <button class="install-close" onclick="closeInstallModal()">Fechar</button>
         </div>
@@ -115,7 +115,7 @@
     <!-- MENU -->
     <div id="menuOverlay" onclick="closeAppMenu()"></div>
     <div id="appMenu">
-        <button style="background:var(--green); color:#000;" id="menuInstallBtn" onclick="showInstallModal()" style="display:none;">📲 INSTALAR</button>
+        <button style="background:var(--green); color:#000;" id="menuInstallBtn" onclick="closeAppMenu(); installApp()">📲 INSTALAR</button>
         <button style="background:#ff5252; color:white;" onclick="zerarTudo()">🗑️ ZERAR</button>
         <button style="background:#333; color:#aaa; border:1px solid #555;" onclick="closeAppMenu()">Fechar</button>
     </div>
@@ -204,16 +204,16 @@
 
     <!-- ABAS -->
     <div class="tabs">
-        <button class="tab active" onclick="setTab('escala')">Escala</button>
-        <button class="tab" onclick="setTab('ganho')">Entregas</button>
-        <button class="tab" onclick="setTab('despesa')">Despesas</button>
-        <button class="tab" onclick="setTab('repasse')">Repasse</button>
+        <button class="tab active" onclick="setTab('escala', this)">Escala</button>
+        <button class="tab" onclick="setTab('ganho', this)">Entregas</button>
+        <button class="tab" onclick="setTab('despesa', this)">Despesas</button>
+        <button class="tab" onclick="setTab('repasse', this)">Repasse</button>
     </div>
 
     <!-- FORMULÁRIO -->
     <div class="card">
         <label style="font-size:0.8rem; color:var(--blue); font-weight:bold;">Data</label>
-        <input type="date" id="dateIn">
+        <input type="date" id="dateIn" onchange="if(this.value) selDate(new Date(this.value + 'T12:00'))">
         
         <div id="p-escala">
             <div style="display:flex; gap:10px;"><input type="time" id="t1" value="19:00"><input type="time" id="t2" value="23:00"></div>
@@ -238,7 +238,7 @@
     <div class="history">
         <h4 style="color:#666; border-bottom:1px solid #333; margin:0 0 10px 0;">📜 Histórico</h4>
         <div id="list"></div>
-        <div id="sys-status" style="text-align:center; font-size:0.8rem; color:#666; padding:10px;">Carregando...</div>
+        <div id="sys-status" style="text-align:center; font-size:0.8rem; color:#666; padding:10px;">Nenhum registro ainda</div>
     </div>
 
     <script>
@@ -265,6 +265,10 @@
         });
 
         window.onload = () => {
+            // já aberto como app instalado: o botão de instalar não faz mais sentido
+            if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+                document.getElementById('menuInstallBtn').style.display = 'none';
+            }
             selDate(new Date());
             loadGPS();
             weather();
@@ -286,27 +290,17 @@
             const ua = navigator.userAgent.toLowerCase();
             const isIOS = /iphone|ipad|ipod/.test(ua);
             
-            if (isIOS) {
-                if (navigator.share) {
-                    navigator.share({
-                        title: 'Entregas Control',
-                        text: 'Use Entregas Control como um app',
-                        url: window.location.href
-                    }).then(() => closeInstallModal()).catch(() => closeInstallModal());
-                } else {
-                    closeInstallModal();
-                }
-            } else {
-                if (deferredPrompt) {
-                    deferredPrompt.prompt();
-                    deferredPrompt.userChoice.then(() => {
-                        closeInstallModal();
-                        deferredPrompt = null;
-                    }).catch(() => closeInstallModal());
-                } else {
-                    closeInstallModal();
-                }
+            if (deferredPrompt) {
+                // Android e computador: abre direto a janela de instalação do navegador
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.finally(() => { closeInstallModal(); deferredPrompt = null; });
+                return;
             }
+            // iPhone não permite instalar por botão; o único caminho é o menu do Safari
+            document.getElementById('installMsg').innerText = isIOS
+                ? 'No iPhone: toque em Compartilhar (□↑) no Safari e depois em "Adicionar à Tela de Início".'
+                : 'O navegador ainda não liberou a instalação. Abra no Chrome, recarregue a página e tente de novo.';
+            showInstallModal();
         }
 
         function showInstallModal() {
@@ -590,10 +584,10 @@
         }
 
         // ===== FORMULÁRIO =====
-        function setTab(m) {
+        function setTab(m, btn) {
             mode = m;
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            event.target.classList.add('active');
+            btn.classList.add('active');
             ['p-escala','p-valor','p-repasse'].forEach(id => document.getElementById(id).style.display = 'none');
             if(m === 'escala') { document.getElementById('p-escala').style.display = 'block'; chkEscala(); }
             else if(m === 'repasse') { document.getElementById('p-repasse').style.display = 'block'; countAnt(); }
@@ -602,20 +596,23 @@
 
         function addVal() {
             const v = parseFloat(document.getElementById('val').value);
-            if(!v) return;
+            if(!(v > 0)) return alert("Digite um valor maior que zero.");
             const d = document.getElementById('dateIn').value.split('-').reverse().join('/');
-            const txt = mode === 'ganho' ? "Entrega" : document.getElementById('desc').value;
+            const txt = document.getElementById('desc').value.trim() || (mode === 'ganho' ? "Entrega" : "Despesa");
             db.unshift({id: Date.now(), type: mode, date: d, val: v, desc: txt});
             saveDB();
             document.getElementById('val').value = '';
+            document.getElementById('desc').value = '';
         }
 
         function addRep(isAnt) {
             const v = parseFloat(document.getElementById('valRep').value);
-            if(!v) return;
-            const d = new Date();
-            db.unshift({id: Date.now(), type: isAnt ? 'ant' : 'rep', date: fmtDate(d), val: v});
+            if(!(v > 0)) return alert("Digite um valor maior que zero.");
+            const d = document.getElementById('dateIn').value.split('-').reverse().join('/');
+            db.unshift({id: Date.now(), type: isAnt ? 'ant' : 'rep', date: d, val: v, desc: isAnt ? 'Antecipação' : 'Repasse'});
             saveDB();
+            document.getElementById('valRep').value = '';
+            countAnt();
         }
 
         function addEscala() {
@@ -643,14 +640,16 @@
         }
 
         function countAnt() {
-            const c = db.filter(x => x.type === 'ant' && x.date.split('/')[1] === String(new Date().getMonth()+1).padStart(2,'0')).length;
-            document.getElementById('antCount').innerText = `${c}/4`;
+            const mesAno = fmtDate(new Date()).slice(3); // "MM/AAAA"
+            const c = db.filter(x => x.type === 'ant' && x.date.slice(3) === mesAno).length;
+            document.getElementById('antCount').innerText = `Antecipações este mês: ${c}/4`;
         }
 
         // ===== CALENDÁRIO =====
         function selDate(d) {
             calDate = new Date(d);
-            document.getElementById('dateIn').value = d.toISOString().split('T')[0];
+            // data local (toISOString usa o fuso de Londres e pulava para o dia seguinte depois das 21h)
+            document.getElementById('dateIn').value = fmtDate(d).split('/').reverse().join('-');
             chkEscala();
             renderUI();
         }
@@ -673,20 +672,21 @@
                 if(x.type === 'despesa') sn -= x.val;
                 if(x.type === 'rep' || x.type === 'ant') { sf -= x.val; sn += x.val; }
             });
-            document.getElementById('valIfood').innerText = `R$ ${sf.toFixed(2)}`;
-            document.getElementById('valNu').innerText = `R$ ${sn.toFixed(2)}`;
+            document.getElementById('valIfood').innerText = fmtMoney(sf);
+            document.getElementById('valNu').innerText = fmtMoney(sn);
 
             const l = document.getElementById('list');
             l.innerHTML = '';
+            document.getElementById('sys-status').style.display = db.length ? 'none' : 'block';
             db.sort((a,b) => b.id - a.id).forEach(x => {
                 const el = document.createElement('div');
                 el.className = 'item';
                 el.style.borderLeftColor = getClr(x.type);
-                let txt = `R$ ${x.val ? x.val.toFixed(2) : 0}`;
+                let txt = fmtMoney(x.val || 0);
                 if(x.type === 'escala') txt = `${x.t1}-${x.t2}`;
                 if(x.type === 'km') txt = `${x.val.toFixed(2)} km • ${x.time || '--:--'}${x.avg ? ' • ' + x.avg.toFixed(1) + ' km/h' : ''}`;
                 let btn = (x.type === 'km' && x.route) ? `<button onclick="openMap(${x.id})" style="width:auto; padding:5px 8px; margin:0 5px; background:var(--orange); color:white; border:none; border-radius:4px; cursor:pointer;">MAPA</button>` : '';
-                el.innerHTML = `<div><b>${x.desc || 'Escala'}</b><br><small>${x.date}</small></div><div style="display:flex; align-items:center; gap:5px;"><span>${txt}</span>${btn}<span onclick="del(${x.id})" style="color:#555; cursor:pointer;">✖</span></div>`;
+                el.innerHTML = `<div><b>${esc(x.desc || defaultDesc(x.type))}</b><br><small>${esc(x.date)}</small></div><div style="display:flex; align-items:center; gap:5px;"><span>${esc(txt)}</span>${btn}<span onclick="del(${x.id})" style="color:#555; cursor:pointer;">✖</span></div>`;
                 l.appendChild(el);
             });
 
@@ -719,14 +719,29 @@
                 const d = await r.json();
                 document.getElementById('temp').innerText = d.current.temperature_2m.toFixed(1) + "°";
                 document.getElementById('feels').innerText = d.current.apparent_temperature.toFixed(1) + "°";
-                document.getElementById('wind').innerText = d.current.wind_speed_10m;
+                document.getElementById('wind').innerText = Math.round(d.current.wind_speed_10m) + " km/h";
                 document.getElementById('rain').innerText = d.daily.precipitation_probability_max[0] + "%";
                 document.getElementById('hum').innerText = d.current.relative_humidity_2m + "%";
+                document.getElementById('icon').innerText = weatherIcon(d.current.weather_code);
             } catch(e) {}
+        }
+
+        // códigos de tempo da Open-Meteo (WMO)
+        function weatherIcon(c) {
+            if(c === 0) return '☀️';
+            if(c <= 2) return '🌤️';
+            if(c === 3) return '☁️';
+            if(c <= 48) return '🌫️';
+            if(c <= 67 || (c >= 80 && c <= 82)) return '🌧️';
+            if(c <= 77 || c === 85 || c === 86) return '❄️';
+            return '⛈️';
         }
 
         // ===== UTILITÁRIOS =====
         function fmtDate(d) { return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; }
+        function fmtMoney(v) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+        function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+        function defaultDesc(t) { return {'ganho':'Entrega','despesa':'Despesa','escala':'Escala','km':'Pedalada','rep':'Repasse','ant':'Antecipação'}[t] || 'Registro'; }
         function getClr(t) { return {'ganho':'var(--green)','despesa':'var(--red)','escala':'var(--purple)','km':'var(--orange)','rep':'var(--blue)','ant':'var(--blue)'}[t] || 'var(--blue)'; }
         function del(id) { if(confirm("Apagar?")){ db = db.filter(x => x.id !== id); saveDB(); } }
     </script>
