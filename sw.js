@@ -1,5 +1,5 @@
 // Service worker do Entregas Control: rede primeiro, cache como reserva offline
-const CACHE = 'entregas-v3';
+const CACHE = 'entregas-v4';
 const BASE = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png',
     'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];
 

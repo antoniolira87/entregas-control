@@ -70,6 +70,13 @@
         
         #viewMapModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 9999; flex-direction: column; }
         #viewMapC { flex: 1; }
+        /* mapa do OpenStreetMap escurecido (o mapa escuro da CARTO passou a exigir chave) */
+        .map-dark { filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9); }
+
+        #gpsHelp { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 10001; align-items: center; justify-content: center; padding: 16px; }
+        #gpsHelp .box { background: #1e1e1e; border: 1px solid #444; border-radius: 14px; padding: 20px; max-width: 420px; width: 100%; }
+        #gpsHelp h3 { margin: 0 0 10px; color: var(--yellow); }
+        #gpsHelp ol { padding-left: 20px; margin: 10px 0; line-height: 1.5; }
 
         .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .stat-box { background: #2c2c2c; border-radius: 8px; padding: 8px; text-align: center; }
@@ -140,6 +147,16 @@
             <input type="text" id="routeTitle" placeholder="Ex: Pedalada da Tarde">
             <button style="background:var(--orange); color:#fff;" onclick="confirmSave()">✅ SALVAR</button>
             <button style="background:transparent; color:#ff5252; border:1px solid #ff5252;" onclick="discardRoute()">Descartar</button>
+        </div>
+    </div>
+
+    <!-- AJUDA DA PERMISSÃO DE LOCALIZAÇÃO -->
+    <div id="gpsHelp">
+        <div class="box">
+            <h3 id="gpsHelpTitle">📍 Localização</h3>
+            <div id="gpsHelpText"></div>
+            <button style="background:var(--green); color:#000;" onclick="closeGpsHelp(); startGPS()">🔄 Tentar de novo</button>
+            <button style="background:#333; color:#aaa; border:1px solid #555;" onclick="closeGpsHelp()">Fechar</button>
         </div>
     </div>
 
@@ -392,13 +409,52 @@
         // ===== GPS =====
         const GPS_MAX_ACC = 40;   // m - pontos com precisão pior que isso não entram no trajeto
         const GPS_MAX_SPD = 70;   // km/h - acima disso é salto do GPS, não movimento real
-        let watchId = null, wakeLock = null;
+        const GAP_SEC = 20;       // s - mais que isso sem ponto = GPS ficou pausado (outro app na frente)
+        const GAP_MIN_KM = 0.15;  // km - buracos menores ficam em linha reta mesmo
+        let watchId = null, wakeLock = null, pendingGaps = [];
 
         function newGPS() {
             return { on: false, km: 0, route: [], last: null, startTime: null, endTime: null, movingMs: 0, maxSpd: 0, lastAccuracy: 0, win: [] };
         }
 
-        function startGPS(resume) {
+        // ---- permissão de localização: pede ANTES de começar, para a tela não ficar "GPS Ativo" sem GPS ----
+        async function permState() {
+            try { return (await navigator.permissions.query({ name: 'geolocation' })).state; } catch(e) { return 'unknown'; }
+        }
+
+        async function ensureLocationPermission() {
+            if(await permState() === 'granted') return true;
+            if(await permState() === 'denied') { showGpsHelp('denied'); return false; }
+            const bgTag = document.getElementById('bgTag');
+            bgTag.innerText = '📍 Pedindo permissão de localização...';
+            bgTag.style.display = 'block';
+            const err = await new Promise(ok => navigator.geolocation.getCurrentPosition(() => ok(null), e => ok(e), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }));
+            bgTag.style.display = 'none';
+            bgTag.innerText = '🔊 GPS Ativo';
+            if(!err || err.code !== 1) { weather(); return true; } // sem sinal ainda não é problema: o GPS continua procurando
+            // se a permissão continua "a perguntar", o Android nem mostrou a pergunta: tem balão de outro app por cima
+            showGpsHelp(await permState() === 'denied' ? 'denied' : 'overlay');
+            return false;
+        }
+
+        function showGpsHelp(kind) {
+            const t = document.getElementById('gpsHelpText');
+            if(kind === 'overlay') {
+                document.getElementById('gpsHelpTitle').innerText = '📍 Feche os balões de outros apps';
+                t.innerHTML = 'O Android não deixou o app pedir a localização porque tem algo de outro app <b>por cima da tela</b> (a bolinha do 99, do iFood, uma conversa flutuante...).' +
+                    '<ol><li>Arraste a bolinha até o <b>X</b> para fechá-la</li><li>Toque em <b>Tentar de novo</b></li><li>Escolha <b>Exato</b> e <b>Permitir ao acessar o site</b></li></ol>' +
+                    '<small style="color:#aaa">Depois de permitir, pode abrir a bolinha de novo: o app não pergunta mais.</small>';
+            } else {
+                document.getElementById('gpsHelpTitle').innerText = '📍 Localização bloqueada';
+                t.innerHTML = 'A localização está bloqueada para o Entregas Control. Para liberar:' +
+                    '<ol><li>Abra o <b>Chrome</b> → menu <b>⋮</b> → <b>Configurações</b></li><li><b>Configurações de sites</b> → <b>Local</b></li><li>Toque em <b>antoniolira87.github.io</b> → <b>Permitir</b></li></ol>' +
+                    '<small style="color:#aaa">Confira também se a localização do celular está ligada.</small>';
+            }
+            document.getElementById('gpsHelp').style.display = 'flex';
+        }
+        function closeGpsHelp() { document.getElementById('gpsHelp').style.display = 'none'; }
+
+        async function startGPS(resume) {
             if(!navigator.geolocation) return alert("❌ GPS não suportado");
             if (navigator.userAgent.includes('WhatsApp')) {
                 alert('❌ GPS não funciona no WhatsApp');
@@ -406,6 +462,7 @@
             }
 
             if(!resume) {
+                if(!(await ensureLocationPermission())) return;
                 gps = newGPS();
                 gps.on = true;
                 gps.startTime = Date.now();
@@ -451,8 +508,21 @@
                 const calcSpd = dt > 0 ? dist / (dt / 3600) : 0;
                 if(calcSpd > GPS_MAX_SPD) return;
 
+                // buraco no trajeto: o Android pausa o GPS do site quando outro app (Maps, 99, iFood) fica na frente.
+                // Liga o último ponto ao novo pelo caminho das ruas, em vez de uma linha reta.
+                if(dt > GAP_SEC && dist >= GAP_MIN_KM) {
+                    spd = devSpd !== null ? devSpd : 0;
+                    const pt = { lat, lon, spd: calcSpd };
+                    const ref = avgSpeed() > 5 ? avgSpeed() : 18; // média ANTES do buraco
+                    gps.km += dist;
+                    gps.movingMs += gapMovingMs(dist, dt, ref);
+                    gps.route.push(pt);
+                    gps.last = { lat, lon, t };
+                    gps.win = [];
+                    fillGap(gps.route[gps.route.length - 2], pt, dist, dt, ref);
+                }
                 // só conta se andou mais que o erro do GPS (evita km fantasma parado no semáforo)
-                if(dist * 1000 >= Math.max(5, acc * 0.5)) {
+                else if(dist * 1000 >= Math.max(5, acc * 0.5)) {
                     // velocidade calculada é suavizada nos últimos ~5s para o ruído do GPS não gerar picos
                     gps.win.push({ dist, dt });
                     while(gps.win.length > 1 && gps.win.reduce((a, w) => a + w.dt, 0) - gps.win[0].dt >= 5) gps.win.shift();
@@ -477,11 +547,38 @@
             saveGPS();
         }
 
+        // tempo em movimento de um buraco: estima pela velocidade média (parou num semáforo/loja não conta)
+        function gapMovingMs(distKm, dtSec, ref) {
+            return Math.min(dtSec, distKm / ref * 3600) * 1000;
+        }
+
+        // pede ao roteador de bicicleta do OpenStreetMap o caminho pelas ruas entre dois pontos
+        function fillGap(a, b, straightKm, dtSec, ref) {
+            const url = `https://routing.openstreetmap.de/routed-bike/route/v1/bike/${a.lon.toFixed(5)},${a.lat.toFixed(5)};${b.lon.toFixed(5)},${b.lat.toFixed(5)}?overview=full&geometries=geojson`;
+            const job = fetch(url).then(r => r.json()).then(j => {
+                const r = j.routes && j.routes[0];
+                if(!r || !gps.route.includes(b)) return;
+                const roadKm = r.distance / 1000;
+                // só aceita se fizer sentido: não menor que a reta, não muito maior, e numa velocidade possível
+                if(roadKm < straightKm || roadKm > straightKm * 2.5 || roadKm / (dtSec / 3600) > GPS_MAX_SPD) return;
+                const spd = roadKm / (dtSec / 3600);
+                const mid = r.geometry.coordinates.slice(1, -1).map(([lon, lat]) => ({ lat, lon, spd, gap: true }));
+                b.gap = true;
+                gps.route.splice(gps.route.indexOf(b), 0, ...mid);
+                gps.movingMs += gapMovingMs(roadKm, dtSec, ref) - gapMovingMs(straightKm, dtSec, ref);
+                gps.km += roadKm - straightKm;
+                document.getElementById('km').innerText = gps.km.toFixed(2);
+                saveGPS();
+            }).catch(() => {}); // sem internet: fica a linha reta
+            pendingGaps.push(job);
+            job.finally(() => { pendingGaps = pendingGaps.filter(x => x !== job); });
+        }
+
         function onGPSError(e) {
             if(!gps.on) return;
             if(e.code === 1) {
-                alert('❌ Permissão de localização negada. Libere o GPS para este site nas configurações do navegador.');
-                stopGPS();
+                stopGPS(true);
+                showGpsHelp('denied');
                 return;
             }
             // sem sinal / timeout: o watch continua tentando, só avisa na tela
@@ -506,7 +603,7 @@
             if(document.visibilityState === 'visible' && gps.on) requestWakeLock();
         });
 
-        function stopGPS() {
+        async function stopGPS(silent) {
             if(watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
             releaseWakeLock();
             gps.on = false;
@@ -520,10 +617,14 @@
             saveGPS();
 
             if(gps.route.length < 2) {
-                alert('❌ Nenhum trajeto registrado: o GPS não pegou sinal bom. Tente em área aberta e espere a precisão ficar verde antes de sair.');
+                if(!silent) alert('❌ Nenhum trajeto registrado: o GPS não pegou sinal bom. Tente em área aberta e espere a precisão ficar verde antes de sair.');
                 resetGPS();
                 return;
             }
+
+            // espera (até 8 s) os trechos que ainda estão sendo completados pelas ruas
+            if(pendingGaps.length) await Promise.race([Promise.all(pendingGaps), new Promise(r => setTimeout(r, 8000))]);
+            saveGPS();
 
             document.getElementById('finishModal').style.display = 'flex';
             document.getElementById('finishStats').innerText =
@@ -536,7 +637,7 @@
             setTimeout(() => {
                 if(finishMap) finishMap.remove();
                 finishMap = L.map('finishMapContainer');
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(finishMap);
+                addBaseMap(finishMap);
                 drawPolyline(gps.route, finishMap);
                 const a = gps.route[0], b = gps.route[gps.route.length-1];
                 L.circleMarker([a.lat, a.lon], { radius: 8, fillColor: '#00e676', color: '#fff', weight: 2, fillOpacity: 0.8 }).addTo(finishMap);
@@ -552,7 +653,8 @@
                 if (p1.spd < 5) color = '#ff1744';
                 if (p1.spd >= 20) color = '#00e676';
 
-                L.polyline([[p1.lat, p1.lon], [p2.lat, p2.lon]], { color, weight: 6, opacity: 0.8, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+                // trecho completado pelas ruas (GPS pausado) aparece tracejado
+                L.polyline([[p1.lat, p1.lon], [p2.lat, p2.lon]], { color, weight: 6, opacity: 0.8, lineCap: 'round', lineJoin: 'round', dashArray: p2.gap ? '2 10' : null }).addTo(map);
             }
             const bounds = points.map(p => [p.lat, p.lon]);
             if(bounds.length > 1) map.fitBounds(bounds, { padding: [50, 50] });
@@ -624,10 +726,14 @@
             setTimeout(() => {
                 if(viewMap) viewMap.remove();
                 viewMap = L.map('viewMapC');
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(viewMap);
+                addBaseMap(viewMap);
                 drawPolyline(item.route, viewMap);
                 viewMap.invalidateSize();
             }, 200);
+        }
+
+        function addBaseMap(map) {
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, className: 'map-dark', attribution: '© OpenStreetMap' }).addTo(map);
         }
 
         function closeViewMap() {
